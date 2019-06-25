@@ -42,7 +42,7 @@ class DanceCheckinForm extends PureComponent<Props, State> {
     profileList: [],
     success: "",
     error: "",
-    showPaymentForm: true,
+    showPaymentForm: false,
     showPaymentConfirmation: false
   };
 
