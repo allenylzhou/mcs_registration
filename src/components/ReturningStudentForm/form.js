@@ -7,20 +7,29 @@ import { Typeahead } from 'react-bootstrap-typeahead';
 import queryString from 'query-string';
 
 import type { ClassCheckin } from "../../types.js";
-import { addNewClassCheckin, getProfiles, getProfileByEmail, setLatestMonthlyPass, getAppDate } from "../../lib/api.js";
+import { addNewClassCheckin, getProfiles, getProfileByEmail, setLatestMonthlyPass, getAppDate, updateClassCheckinWithPayment } from "../../lib/api.js";
 import { getSubstringIndex, currentMonthIndex, currentMonthString, currentYear, sortByNameAndEmail, getDateFromStringSafe } from "../../lib/utils.js";
 import McsAlert from "../Utilities/alert.js";
 import { CodeOfConductModalLink } from "../Utilities/conductModal.js";
 import { LiabilityWaiverModalLink } from "../Utilities/waiverModal.js";
 import { Link } from 'react-router-dom';
+import PaymentForm from "../PaymentForm/index.js";
 
-
-type State = ClassCheckin;
+type State = ClassCheckin & {
+  showPaymentForm: boolean,
+  showPaymentConfirmation: boolean
+};
 
 type Props = {};
 
-class ReturningStudentForm extends PureComponent<Props, State> {
+const CLASS_TYPES = {
+  FUNDAMENTALS_DROPIN: 'WCS Fundamentals, Drop-in',
+  FUNDAMENTALS_MONTHLY: 'WCS Fundamentals, Monthly Series',
+  INTERMEDIATE_DROPIN: 'Intermediate WCS, Drop-in',
+  INTERMEDIATE_MONTHLY: 'Intermediate WCS, Monthly Series'
+}
 
+class ReturningStudentForm extends PureComponent<Props, State> {
   defaultCheckin = {
     firstName: "",
     lastName: "",
@@ -41,10 +50,13 @@ class ReturningStudentForm extends PureComponent<Props, State> {
     profileList: [],
     profileMap: {},
     success: "",
-    error: ""
+    error: "",
+    showPaymentForm: false,
+    showPaymentConfirmation: false
   };
 
   componentDidMount() {
+    this.includePaymentForm = !!queryString.parse(window.location.search).self_serve;
     // Get and set list of profiles for profile select
     this.getAndSetProfilesList()
     // Get student if redirected from new student form
@@ -189,6 +201,7 @@ class ReturningStudentForm extends PureComponent<Props, State> {
 
     var newStateCheckin = {...this.state.checkin};
     newStateCheckin.classes = newArray
+
     this.setState({
       checkin: newStateCheckin
     });
@@ -255,13 +268,18 @@ class ReturningStudentForm extends PureComponent<Props, State> {
   onSubmit = (options) => {
     // Error handling
     var onSuccess = () => {
-      var classesStr = this.state.checkin.classes.join("; ")
-      var successText = `Added class check-in for ${this.state.checkin.firstName} ${this.state.checkin.lastName}: ${classesStr}`
-      this.setState({
-        success: successText,
-        error: ""
-      });
-      this.addActionsOnSubmit({success: successText});
+      const amount = this.paymentAmount(this.state.checkin.classes);
+      if (this.includePaymentForm && amount > 0) {
+        this.setState({ showPaymentForm: true });
+      } else {
+        var classesStr = this.state.checkin.classes.join("; ")
+        var successText = `Added class check-in for ${this.state.checkin.firstName} ${this.state.checkin.lastName}: ${classesStr}`
+        this.setState({
+          success: successText,
+          error: ""
+        });
+        this.addActionsOnSubmit({success: successText});
+      }
     }
     var onError = (errorText) => {
       this.setState({error: errorText});
@@ -289,8 +307,40 @@ class ReturningStudentForm extends PureComponent<Props, State> {
     }
   };
 
-  render() {
+  paymentAmount(classes) {
+    if (classes.includes(CLASS_TYPES.FUNDAMENTALS_MONTHLY) || classes.includes(CLASS_TYPES.INTERMEDIATE_MONTHLY)) {
+      return 0;
+    }
+    if (classes.length === 1) {
+      return 15;
+    } else if (classes.length === 2) {
+      return 25;
+    }
+    return 0;
+  }
 
+  handleNonce(nonce, amount) {
+    updateClassCheckinWithPayment({
+      ...this.state.checkin,
+      date: this.state.date
+      },
+      nonce,
+      amount
+    ).then((checkinId) => {
+      this.setState({
+        showPaymentConfirmation: true
+      });
+    })
+  }
+
+  render() {
+    const { showPaymentForm } = this.state;
+    if (this.includePaymentForm && showPaymentForm) {
+      return <PaymentForm
+        amount={this.paymentAmount(this.state.checkin.classes)}
+        handleNonce={this.handleNonce.bind(this)}
+      />;
+    }
     return (
       <div>
         <McsAlert color="success" text={this.state.success} visible={this.state.success.length > 0} onToggle={this.toggleAlerts.bind(this)}></McsAlert>
@@ -355,22 +405,46 @@ class ReturningStudentForm extends PureComponent<Props, State> {
             <legend>Checking in for... (Select all that apply.)</legend>
             <FormGroup check>
               <Label check>
-                <Input onChange={this.onMultiTypeCheckinChange} type="checkbox" name="classes" checked={this.state.checkin.classes.indexOf('WCS Fundamentals, Drop-in') !== -1} value="WCS Fundamentals, Drop-in" /> {' '} WCS Fundamentals, Drop-in
+                <Input
+                  onChange={this.onMultiTypeCheckinChange}
+                  type="checkbox"
+                  name="classes"
+                  checked={this.state.checkin.classes.indexOf(CLASS_TYPES.FUNDAMENTALS_DROPIN) !== -1}
+                  value={CLASS_TYPES.FUNDAMENTALS_DROPIN}
+                /> {' '} {CLASS_TYPES.FUNDAMENTALS_DROPIN}
               </Label>
             </FormGroup>
             <FormGroup check>
               <Label check>
-                <Input onChange={this.onMultiTypeCheckinChange} type="checkbox" name="classes" checked={this.state.checkin.classes.indexOf('WCS Fundamentals, Monthly Series') !== -1} value="WCS Fundamentals, Monthly Series" /> {' '} WCS Fundamentals, Monthly Series
+                <Input
+                  onChange={this.onMultiTypeCheckinChange}
+                  type="checkbox"
+                  name="classes"
+                  checked={this.state.checkin.classes.indexOf(CLASS_TYPES.FUNDAMENTALS_MONTHLY) !== -1}
+                  value={CLASS_TYPES.FUNDAMENTALS_MONTHLY}
+                /> {' '} {CLASS_TYPES.FUNDAMENTALS_MONTHLY}
               </Label>
             </FormGroup>
             <FormGroup check>
               <Label check>
-                <Input onChange={this.onMultiTypeCheckinChange} type="checkbox" name="classes" checked={this.state.checkin.classes.indexOf('Intermediate WCS, Drop-in') !== -1} value="Intermediate WCS, Drop-in" /> {' '} Intermediate WCS, Drop-in
+                <Input
+                  onChange={this.onMultiTypeCheckinChange}
+                  type="checkbox"
+                  name="classes"
+                  checked={this.state.checkin.classes.indexOf(CLASS_TYPES.INTERMEDIATE_DROPIN) !== -1}
+                  value={CLASS_TYPES.INTERMEDIATE_DROPIN}
+                /> {' '} {CLASS_TYPES.INTERMEDIATE_DROPIN}
               </Label>
             </FormGroup>
             <FormGroup check>
               <Label check>
-                <Input onChange={this.onMultiTypeCheckinChange} type="checkbox" name="classes" checked={this.state.checkin.classes.indexOf('Intermediate WCS, Monthly Series') !== -1} value="Intermediate WCS, Monthly Series" /> {' '} Intermediate WCS, Monthly Series
+                <Input
+                  onChange={this.onMultiTypeCheckinChange}
+                  type="checkbox"
+                  name="classes"
+                  checked={this.state.checkin.classes.indexOf(CLASS_TYPES.INTERMEDIATE_MONTHLY) !== -1}
+                  value={CLASS_TYPES.INTERMEDIATE_MONTHLY}
+                /> {' '} {CLASS_TYPES.INTERMEDIATE_MONTHLY}
               </Label>
             </FormGroup>
           </FormGroup>
